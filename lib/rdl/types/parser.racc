@@ -1,0 +1,174 @@
+class Parser
+  prechigh
+    left COMMA
+    right RARROW
+    left OR
+  preclow
+
+  start entry
+
+token HASH_TYPE HASH_QUERY CONST_BEGIN RASSOC
+token OR FIXNUM FLOAT COLON RARROW DOT DOTS ID SYMBOL SPECIAL_ID STRING PREDICATE
+token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET
+token COMMA QUERY BANG STARSTAR STAR LESS GREATER
+token EOF
+
+rule
+
+  entry:
+      method_type { result = val[0] }
+    | bare_type { result = val[0] }
+    | query_type { result = val[0] }
+
+  bare_type:
+      HASH_TYPE spec_type_expr { result = val[1] }
+
+  query_type:
+      HASH_QUERY method_type { result = RDL::Type::MethodType.new val[1].args, val[1].block, val[1].ret }
+
+  method_type:
+      LPAREN arg_list RPAREN block RARROW type_expr {
+        result = RDL::Type::MethodType.new val[1], val[3], val[5]
+      }
+   | LPAREN arg_list RPAREN block RARROW type_expr ID {
+        result = RDL::Type::MethodType.new val[1], val[3], RDL::Type::AnnotatedArgType.new(val[6], val[5])
+      }
+   | LPAREN arg_list RPAREN block RARROW type_expr ID PREDICATE {
+        result = RDL::Type::MethodType.new val[1], val[3], RDL::Type::DependentArgType.new(val[6], val[5], val[7])
+      }
+
+  method_sig_list:
+     ID COLON method_type { result = [val[0].to_sym, val[2]] }
+   | ID COLON method_type COMMA method_sig_list { result = [val[0].to_sym, val[2]] + val[4] }
+
+  arg_list:
+      { result = [] }
+    | nonempty_arg_list { result = val[0] }
+    | named_arg_list {
+      result = [RDL::Type::FiniteHashType.new(Hash[*val[0][0]], val[0][1])]
+      }
+  nonempty_arg_list:
+      arg { result = [val[0]] }
+    | arg COMMA nonempty_arg_list { result = val[2].unshift val[0] }
+    | arg COMMA named_arg_list { # named arg list must come last
+      result = [val[0], RDL::Type::FiniteHashType.new(Hash[*val[2][0]], val[2][1])]
+      }
+  arg:
+      base_arg { result = val[0] }
+    | base_arg ID PREDICATE { result = RDL::Type::DependentArgType.new(val[1], val[0], val[2]) }
+    | base_arg ID { result = RDL::Type::AnnotatedArgType.new(val[1], val[0]) }
+    | DOTS { result = RDL::Type::DotsQuery.new }
+  named_arg_list:
+      named_arg { result = [val[0], nil] }
+    | STARSTAR type_expr { result = [[], val[1]] }
+    | named_arg COMMA named_arg_list { result = [val[0] + val[2][0], val[2][1]] }
+  named_arg:
+      ID COLON base_arg_query_only { result = [val[0].to_sym, val[2]] }
+
+  base_arg:
+      QUERY type_expr { result = RDL::Type::OptionalType.new val[1] }
+    | STAR type_expr { result = RDL::Type::VarargType.new val[1] }
+    | type_expr { result = val[0] }
+  base_arg_query_only:
+      QUERY type_expr { result = RDL::Type::OptionalType.new val[1] }
+    | type_expr { result = val[0] }
+
+  block:
+      { result = nil }
+    | LBRACE method_type RBRACE { result = val[1] }
+    | QUERY LBRACE method_type RBRACE { result = RDL::Type::OptionalType.new val[2] }
+
+  spec_type_expr:
+    type_expr ID PREDICATE  { result = RDL::Type::DependentArgType.new(val[1], val[0], val[2]) }
+  | type_expr ID { result = RDL::Type::AnnotatedArgType.new(val[1], val[0]) }
+  | type_expr { result = val[0] }
+
+  type_expr:
+    union_type { result = val[0] }
+  | LPAREN type_expr RPAREN { result = val[1] }
+
+  type_expr_comma_list:
+      type_expr { result = [val[0]] }
+    | type_expr COMMA type_expr_comma_list { result = [val[0]] + val[2] }
+
+  hash_expr:
+  | named_arg { result = val[0] }
+  | FIXNUM RASSOC union_type { result = [val[0].to_i, val[2]] }
+  | FLOAT RASSOC union_type { result = [val[0].to_f, val[2]] }
+  | CONST_BEGIN ID RBRACE RASSOC union_type {
+    result = [Kernel.const_get(val[0]), val[2]]
+  }
+  | STRING RASSOC union_type { result = [val[0], val[2]] } # strings are allowed as finite hash keys
+
+  hash_expr_comma_list:
+      hash_expr { result = [val[0], nil] }
+    | STARSTAR type_expr { result = [[], val[1]] }
+    | hash_expr COMMA hash_expr_comma_list { result = [val[0] + val[2][0], val[2][1]] }
+
+  union_type:
+    single_type { result = val[0] }
+  | single_type OR union_type { result = RDL::Type::UnionType.new val[0], val[2] }
+  | BANG single_type { result = RDL::Type::NonNullType.new val[1] }
+  | BANG single_type OR union_type { result = RDL::Type::UnionType.new(RDL::Type::NonNullType.new(val[1]), val[3]) }
+
+  single_type:
+      SYMBOL { result = RDL::Type::SingletonType.new(val[0].to_sym) }
+    | ID {
+      if val[0] == 'nil' then
+        result = RDL.types[:nil]
+      elsif val[0] == 'true' then
+        result = RDL.types[:true]
+      elsif val[0] == 'false'
+        result = RDL.types[:false]
+      elsif val[0] =~ /^[a-z_]+\w*\'?/ then
+        result = RDL::Type::VarType.new(val[0].to_sym)
+      else
+        result = RDL::Type::NominalType.new val[0]
+      end
+    }
+    | SPECIAL_ID {
+      if RDL.special_types.has_key? val[0] then
+        result = RDL.special_types[val[0]]
+      else
+        fail "Unexpected special type identifier #{val[0]}"
+      end
+    }
+    | ID LESS type_expr_comma_list GREATER {
+      n = RDL::Type::NominalType.new(val[0])
+      result = RDL::Type::GenericType.new(n, *val[2])
+    }
+    | LBRACE method_type RBRACE { result = val[1] }
+    | LBRACKET type_expr_comma_list RBRACKET {
+      result = RDL::Type::TupleType.new(*val[1])
+    }
+    | LBRACKET method_sig_list RBRACKET {
+      result = RDL::Type::StructuralType.new(Hash[*val[1]])
+    }
+    | LBRACKET RBRACKET {
+      result = RDL::Type::TupleType.new
+    }
+    | LBRACE hash_expr_comma_list RBRACE {
+      result = RDL::Type::FiniteHashType.new(Hash[*val[1][0]], val[1][1])
+    }
+    | FIXNUM { result = RDL::Type::SingletonType.new(val[0].to_i) }
+    | FLOAT { result = RDL::Type::SingletonType.new(val[0].to_f) }
+    | CONST_BEGIN ID RBRACE {
+      result =  RDL::Type::SingletonType.new(Kernel.const_get(val[1]))
+    }
+# The following can't be used in SingletonTypes because those compare using .equal?
+#    | STRING { result = RDL::Type::SingletonType.new(val[0]) }
+    | DOT { result = RDL::Type::WildQuery.new }
+
+---- header ----
+
+module RDL::Type
+
+---- inner ----
+
+def initialize()
+  @yydebug = true
+end
+
+---- footer ----
+
+end
