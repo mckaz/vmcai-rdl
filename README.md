@@ -39,7 +39,7 @@
   * [Tuples, Finite Hashes, and Subtyping](#tuples-finite-hashes-and-subtyping)
   * [Other Features and Limitations](#other-features-and-limitations)
   * [Assumptions](#assumptions)
-* [Verification] (#verification)
+* [Verification](#verification)
 * [Other RDL Methods](#other-rdl-methods)
 * [Performance](#performance)
 * [Queries](#queries)
@@ -762,11 +762,11 @@ RDL will verify this method by translating the relevant subset of the Ruby progr
 
 The subset of the Ruby program that is translated to Rosette will be type checked prior to translation. This means you must provide all relevant method and variable type annotations (unless they are methods from Ruby's standard/core libraries, in which case RDL will already include them). In the example above, all called methods are from Ruby's libraries, so only the type annotation for the verified method itself is required.
 
-At the moment, only a subset of Ruby's standard/core library methods are encoded in Rosette. This include subsets of Ruby's Integer, Float, Boolean, Array, and BasicObject libraries. You can see the fool list of supported methods within the Rosette files found in the [/lib/rdl/verif_libraries/ director](https://github.com/mckaz/vmcai-rdl/tree/master/lib/rdl/verif_libraries). All standard/core library methods not already supported must either be written directly in Rosette by the user, or the type annotations for these methods must be used modularly, as described below.
+At the moment, only a subset of Ruby's standard/core library methods are encoded in Rosette. This include subsets of Ruby's Integer, Float, Boolean, Array, and BasicObject libraries. You can see the fool list of supported methods within the Rosette files found in the [/lib/rdl/verif_libraries/ directory](https://github.com/mckaz/vmcai-rdl/tree/master/lib/rdl/verif_libraries). All standard/core library methods not already supported must either be written directly in Rosette by the user, or the type annotations for these methods must be used modularly, as described below.
 
 ## Modular Verification
 
-Typically, when a method to be verified is translated to Rosette, we will also translated any methods which are in its call graph. By directly translating all called methods in this way, we get access to all of the information which is found within these methods, which can be useful for verification. However, it is not always possible or desirable to translated a called method: the method may not be defined yet, or it may include loops or other properties which are difficult for a solver to statically reason about.
+Typically, when a method to be verified is translated to Rosette, we will also translated any methods which are in its call graph. By directly translating all called methods in this way, we get access to all of the information encoded within these methods, which can be useful for verification. However, it is not always possible or desirable to translated a called method: the method may not be defined yet, or it may include loops or other properties which are difficult for a solver to statically reason about.
 
 Therefore, we allow for a called method to be treated modularly, by only using its type annotation as opposed to using its straight-line code. In order to do so, simply attach the label `modular: true` to a method's type annotation. Consider the somewhat contrived example below:
 
@@ -779,7 +779,7 @@ end
 type :val, '() -> %integer v {{ v>0 }}', modular: true
 ```
 
-Verifying the `add_pos` method above relies on the result of the `val` method being greater than zero. We encode this in the type annotation for `val` as a refinement type on ints return value. This provides us with enough information to verify `add_pos`, without actually looking at `val`'s code.
+Verifying the `add_pos` method above relies on the result of the `val` method being greater than zero. We encode this in the type annotation for `val` as a refinement type on ints return value. This provides us with enough information to verify `add_pos` when we call `rdl_do_verify :later`, without actually looking at `val`'s code.
 
 To be as precise as we can when performing modular verification, the user may optionally provide purity annotations in their type signature. A use may attach `pure: true` to a modular type signature, indicating that a method is pure. This tells the verifier that the method has no side effects, and furthermore that the method satisfies the congruence property that any two equivalent inputs will yield the same output.
 
