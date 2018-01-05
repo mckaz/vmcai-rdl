@@ -39,6 +39,7 @@
   * [Tuples, Finite Hashes, and Subtyping](#tuples-finite-hashes-and-subtyping)
   * [Other Features and Limitations](#other-features-and-limitations)
   * [Assumptions](#assumptions)
+* [Verification] (#verification)
 * [Other RDL Methods](#other-rdl-methods)
 * [Performance](#performance)
 * [Queries](#queries)
@@ -737,6 +738,59 @@ RDL's static type checker makes some assumptions that should hold unless your Ru
 * `Proc#call` is not redefined
 
 (More assumptions will be added here as they are added to RDL...)
+
+# Verification
+
+This version of RDL includes an extension allowing for verification of basic refinement types. This feature is still under development, so there are a number of Ruby features which are not yet supported for verification.
+
+In order to verify a method, you must write a type annotation for that method which includes a refinement type for the output, effectively serving as a postcondition you wish to verify. The rules for verifying a method are then similar to those for static type checking: calling `type` with `verify: :now` will statically verify the annotated method body against the given signature as soon as the method is defined (or immediately if the method is already defined). On the other hand, you can call `type` with `verify: sym`, where `sym` is some arbitrary symbol. Then, when `rdl_do_verify sym` is called, all methods verified at `sym` will be checked. Finally, `verify: :call` will result in the method being verified once it is called.
+
+Below is an example of verifying a method:
+
+```ruby
+type '(%integer x) -> %integer y {{ (y == x) || (y == -x) }}', verify: :now
+def abs(x)
+  if x>0
+    x
+  else
+    -x
+  end
+end
+```
+
+RDL will verify this method by translating the relevant subset of the Ruby program to [Rosette](https://emina.github.io/rosette/), a solver-aided host language. In fact, upon verifying a method, a new file called `translated.rkt` will be created in the current working directory; you can see the translated Rosette program here.
+
+The subset of the Ruby program that is translated to Rosette will be type checked prior to translation. This means you must provide all relevant method and variable type annotations (unless they are methods from Ruby's standard/core libraries, in which case RDL will already include them). In the example above, all called methods are from Ruby's libraries, so only the type annotation for the verified method itself is required.
+
+At the moment, only a subset of Ruby's standard/core library methods are encoded in Rosette. This include subsets of Ruby's Integer, Float, Boolean, Array, and BasicObject libraries. You can see the fool list of supported methods within the Rosette files found in the [/lib/rdl/verif_libraries/ director](https://github.com/mckaz/vmcai-rdl/tree/master/lib/rdl/verif_libraries). All standard/core library methods not already supported must either be written directly in Rosette by the user, or the type annotations for these methods must be used modularly, as described below.
+
+## Modular Verification
+
+Typically, when a method to be verified is translated to Rosette, we will also translated any methods which are in its call graph. By directly translating all called methods in this way, we get access to all of the information which is found within these methods, which can be useful for verification. However, it is not always possible or desirable to translated a called method: the method may not be defined yet, or it may include loops or other properties which are difficult for a solver to statically reason about.
+
+Therefore, we allow for a called method to be treated modularly, by only using its type annotation as opposed to using its straight-line code. In order to do so, simply attach the label `modular: true` to a method's type annotation. Consider the somewhat contrived example below:
+
+```ruby
+type '(%integer x {{ x>0 }}) -> %integer y {{ y>0 }}', verify: :later
+def add_pos(x)
+  x+val()
+end
+
+type :val, '() -> %integer v {{ v>0 }}', modular: true
+```
+
+Verifying the `add_pos` method above relies on the result of the `val` method being greater than zero. We encode this in the type annotation for `val` as a refinement type on ints return value. This provides us with enough information to verify `add_pos`, without actually looking at `val`'s code.
+
+To be as precise as we can when performing modular verification, the user may optionally provide purity annotations in their type signature. A use may attach `pure: true` to a modular type signature, indicating that a method is pure. This tells the verifier that the method has no side effects, and furthermore that the method satisfies the congruence property that any two equivalent inputs will yield the same output.
+
+If a method is not labeled as pure, it is presumed to be impure, meaning that it may perform side effects, and furthermore that two equivalent inputs may yield different outputs. To increase precision in this case, the user can include a `modifies` caluse, which consists of a hash mapping input names to a list of field names which are potentially modified by the method. For example:
+
+```ruby
+type :m, '(A in) -> %integer out', modular: true, modifies: { in: [@foo, @bar] }
+```
+
+The type signature for method `m` tells us that the method may change the `@foo` and `@bar` fields of the input `in`. During verification, the calling of this method will result in resetting these fields to unknown symbolic values. At the moment, we only support modular side effects which alter the values of fields of inputs.
+
 
 # Other RDL Methods
 
