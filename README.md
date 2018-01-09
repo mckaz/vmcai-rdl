@@ -51,6 +51,8 @@
 
 # Introduction
 
+**NOTE:** This version captures the state of RDL at the time of our paper submission to VMCAI (paper [here](https://arxiv.org/abs/1711.09281)). We recommend using it with Ruby versions *prior* to 2.4.  
+
 RDL is a lightweight system for adding types, type checking, and contracts to Ruby.  In RDL, *types* can be used to decorate methods:
 
 ```ruby
